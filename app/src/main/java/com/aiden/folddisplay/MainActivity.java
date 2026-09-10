@@ -463,33 +463,9 @@ public class MainActivity extends Activity {
             View view,
             int degrees
     ) {
-        view.setRotation(
-                (float) degrees
-        );
-
-        if (
-                degrees == 90 ||
-                degrees == 270
-        ) {
-            view.post(() -> {
-                float w = view.getWidth();
-                float h = view.getHeight();
-
-                if (w <= 0 || h <= 0) return;
-
-                float scale =
-                        Math.min(
-                                h / w,
-                                w / h
-                        );
-
-                view.setScaleX(scale);
-                view.setScaleY(scale);
-            });
-        } else {
-            view.setScaleX(1f);
-            view.setScaleY(1f);
-        }
+        view.setRotation((float) degrees);
+        view.setScaleX(1f);
+        view.setScaleY(1f);
     }
 
     private void reopenShell() {
