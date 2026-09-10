@@ -232,16 +232,66 @@ public class MainActivity extends Activity {
             return;
         }
 
-        Intent i = new Intent(this, ExternalCanvasActivity.class);
-        i.putExtra("rotation", degrees);
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
         try {
-            ActivityOptions options = ActivityOptions.makeBasic();
-            options.setLaunchDisplayId(ext.getDisplayId());
-            startActivity(i, options.toBundle());
+            final android.app.Presentation presentation =
+                    new android.app.Presentation(this, ext);
+
+            android.widget.FrameLayout root =
+                    new android.widget.FrameLayout(this);
+            root.setBackgroundColor(android.graphics.Color.BLACK);
+
+            android.widget.TextView text =
+                    new android.widget.TextView(this);
+            text.setText(
+                    "FOLD DISPLAY TEST\n\n" +
+                    "Display ID: " + ext.getDisplayId() + "\n" +
+                    "Software rotation: " + degrees + "°\n\n" +
+                    "TAP THIS SCREEN"
+            );
+            text.setTextColor(android.graphics.Color.WHITE);
+            text.setTextSize(28);
+            text.setGravity(android.view.Gravity.CENTER);
+
+            android.widget.FrameLayout.LayoutParams lp =
+                    new android.widget.FrameLayout.LayoutParams(
+                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+                    );
+
+            root.addView(text, lp);
+
+            text.setRotation((float) degrees);
+
+            if (degrees == 90 || degrees == 270) {
+                text.post(() -> {
+                    float sx = (float) text.getHeight() /
+                            Math.max(1, text.getWidth());
+                    float sy = (float) text.getWidth() /
+                            Math.max(1, text.getHeight());
+                    float scale = Math.min(sx, sy);
+
+                    text.setScaleX(scale);
+                    text.setScaleY(scale);
+                });
+            }
+
+            root.setOnClickListener(v -> {
+                text.setText(
+                        "TOUCH WORKS ✓\n\n" +
+                        "Display ID: " + ext.getDisplayId() + "\n" +
+                        "Rotation: " + degrees + "°"
+                );
+            });
+
+            presentation.setContentView(root);
+            presentation.show();
+
+            toast("Presentation opened on display " + ext.getDisplayId());
+
         } catch (Throwable t) {
-            toast("Couldn't open test on external: " + t.getClass().getSimpleName());
+            toast("Presentation failed: " +
+                    t.getClass().getSimpleName() + ": " +
+                    String.valueOf(t.getMessage()));
         }
     }
 
