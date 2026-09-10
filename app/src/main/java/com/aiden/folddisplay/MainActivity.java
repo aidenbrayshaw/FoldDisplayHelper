@@ -1,8 +1,8 @@
 package com.aiden.folddisplay;
 
 import android.app.Activity;
-import android.app.ActivityManager;
 import android.app.ActivityOptions;
+import android.app.Presentation;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -15,6 +15,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -31,23 +32,36 @@ public class MainActivity extends Activity {
     private DisplayManager displayManager;
     private TextView displayInfo;
     private Spinner appSpinner;
+
+    private Presentation externalShell;
+    private int shellRotation = 90;
+
     private final ArrayList<AppEntry> apps = new ArrayList<>();
 
     static class AppEntry {
         final String label;
         final String packageName;
+
         AppEntry(String label, String packageName) {
             this.label = label;
             this.packageName = packageName;
         }
-        @Override public String toString() { return label; }
+
+        @Override
+        public String toString() {
+            return label;
+        }
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+
+        displayManager =
+                (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
+
         setContentView(buildUi());
+
         loadApps();
         refreshDisplays();
     }
@@ -61,116 +75,192 @@ public class MainActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setText("Fold Display");
-        title.setTextSize(26);
+        title.setTextSize(28);
         title.setTextColor(Color.BLACK);
-        title.setPadding(0, 0, 0, dp(8));
         body.addView(title);
 
         TextView sub = new TextView(this);
         sub.setText(
-            "MVP: keep the monitor in its stable HDMI mode, then launch apps directly " +
-            "onto Android's secondary display. This does NOT change Samsung/DeX rotation."
+                "Frankenstein Fold shell\n\n" +
+                "The external touchscreen runs as its own persistent Android Presentation."
         );
         sub.setTextSize(15);
+        sub.setPadding(0, dp(6), 0, dp(12));
         body.addView(sub);
 
         displayInfo = new TextView(this);
         displayInfo.setTextSize(15);
-        displayInfo.setPadding(0, dp(16), 0, dp(12));
+        displayInfo.setPadding(0, dp(8), 0, dp(12));
         body.addView(displayInfo);
 
         Button refresh = new Button(this);
-        refresh.setText("Refresh external display");
+        refresh.setText("Refresh displays");
         refresh.setOnClickListener(v -> refreshDisplays());
         body.addView(refresh);
 
+        Button openShell = new Button(this);
+        openShell.setText("OPEN FOLD SHELL");
+        openShell.setOnClickListener(v -> openExternalShell());
+        body.addView(openShell);
+
+        Button closeShell = new Button(this);
+        closeShell.setText("Close fold shell");
+        closeShell.setOnClickListener(v -> closeExternalShell());
+        body.addView(closeShell);
+
+        TextView rotLabel = new TextView(this);
+        rotLabel.setText("External software rotation");
+        rotLabel.setTextSize(17);
+        rotLabel.setPadding(0, dp(20), 0, dp(5));
+        body.addView(rotLabel);
+
+        Button rot0 = new Button(this);
+        rot0.setText("0°");
+        rot0.setOnClickListener(v -> {
+            shellRotation = 0;
+            reopenShell();
+        });
+        body.addView(rot0);
+
+        Button rot90 = new Button(this);
+        rot90.setText("90°");
+        rot90.setOnClickListener(v -> {
+            shellRotation = 90;
+            reopenShell();
+        });
+        body.addView(rot90);
+
+        Button rot270 = new Button(this);
+        rot270.setText("270°");
+        rot270.setOnClickListener(v -> {
+            shellRotation = 270;
+            reopenShell();
+        });
+        body.addView(rot270);
+
         TextView appLabel = new TextView(this);
-        appLabel.setText("App to launch on external screen");
-        appLabel.setTextSize(16);
-        appLabel.setPadding(0, dp(18), 0, dp(6));
+        appLabel.setText("Phone-side app launch test");
+        appLabel.setTextSize(17);
+        appLabel.setPadding(0, dp(20), 0, dp(5));
         body.addView(appLabel);
 
         appSpinner = new Spinner(this);
         body.addView(appSpinner);
 
         Button launch = new Button(this);
-        launch.setText("Launch selected app on external");
-        launch.setOnClickListener(v -> launchSelectedExternal());
+        launch.setText("Try selected app on external");
+        launch.setOnClickListener(v -> {
+            if (apps.isEmpty()) return;
+
+            AppEntry entry =
+                    (AppEntry) appSpinner.getSelectedItem();
+
+            launchApp(entry);
+        });
         body.addView(launch);
-
-        Button testNormal = new Button(this);
-        testNormal.setText("Test external canvas");
-        testNormal.setOnClickListener(v -> launchTestExternal(0));
-        body.addView(testNormal);
-
-        Button test90 = new Button(this);
-        test90.setText("Test SOFTWARE 90° rotation");
-        test90.setOnClickListener(v -> launchTestExternal(90));
-        body.addView(test90);
-
-        Button test270 = new Button(this);
-        test270.setText("Test SOFTWARE 270° rotation");
-        test270.setOnClickListener(v -> launchTestExternal(270));
-        body.addView(test270);
 
         TextView note = new TextView(this);
         note.setText(
-            "\nWhat the 90°/270° test proves:\n" +
-            "• HDMI timing stays untouched.\n" +
-            "• Only our own rendered content rotates.\n" +
-            "• If the panel stays connected, we know DeX's display-mode change was the problem.\n\n" +
-            "Next step after this test: add a Shizuku/ADB-powered per-display rotation option " +
-            "for arbitrary apps if your Samsung build exposes the needed display command."
+                "\nExternal shell behavior:\n" +
+                "• Runs without Shizuku.\n" +
+                "• HDMI timing is never rotated.\n" +
+                "• Whole external UI rotates in software.\n" +
+                "• Touch works directly on the second panel.\n" +
+                "• App buttons try display 2 first.\n" +
+                "• If Samsung blocks that, the app opens on the phone.\n"
         );
         note.setTextSize(14);
         body.addView(note);
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(body);
+
         return scroll;
     }
 
     private void loadApps() {
         PackageManager pm = getPackageManager();
+
         Intent intent = new Intent(Intent.ACTION_MAIN);
         intent.addCategory(Intent.CATEGORY_LAUNCHER);
 
-        List<ResolveInfo> infos = pm.queryIntentActivities(intent, 0);
+        List<ResolveInfo> infos =
+                pm.queryIntentActivities(intent, 0);
+
         apps.clear();
 
         for (ResolveInfo ri : infos) {
             String pkg = ri.activityInfo.packageName;
+
             if (pkg.equals(getPackageName())) continue;
-            String label = ri.loadLabel(pm).toString();
+
+            String label =
+                    ri.loadLabel(pm).toString();
+
             apps.add(new AppEntry(label, pkg));
         }
 
-        Collections.sort(apps, Comparator.comparing(a -> a.label.toLowerCase()));
+        Collections.sort(
+                apps,
+                Comparator.comparing(
+                        a -> a.label.toLowerCase()
+                )
+        );
+
         ArrayAdapter<AppEntry> adapter =
-            new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, apps);
+                new ArrayAdapter<>(
+                        this,
+                        android.R.layout.simple_spinner_dropdown_item,
+                        apps
+                );
+
         appSpinner.setAdapter(adapter);
     }
 
     private void refreshDisplays() {
-        Display[] displays = displayManager.getDisplays();
-        StringBuilder s = new StringBuilder("Displays Android sees:\n");
+        Display[] displays =
+                displayManager.getDisplays();
+
+        StringBuilder s =
+                new StringBuilder("Displays Android sees:\n");
 
         for (Display d : displays) {
-            android.util.DisplayMetrics m = new android.util.DisplayMetrics();
+            android.util.DisplayMetrics m =
+                    new android.util.DisplayMetrics();
+
             d.getRealMetrics(m);
-            s.append("• ID ").append(d.getDisplayId())
-             .append(d.getDisplayId() == Display.DEFAULT_DISPLAY ? " (phone)" : " (secondary)")
-             .append(" — ")
-             .append(m.widthPixels).append("×").append(m.heightPixels)
-             .append(" rot=").append(d.getRotation())
-             .append("\n");
+
+            s.append("• ID ")
+                    .append(d.getDisplayId())
+                    .append(
+                            d.getDisplayId()
+                                    == Display.DEFAULT_DISPLAY
+                                    ? " (phone)"
+                                    : " (secondary)"
+                    )
+                    .append(" — ")
+                    .append(m.widthPixels)
+                    .append("×")
+                    .append(m.heightPixels)
+                    .append(" rot=")
+                    .append(d.getRotation())
+                    .append("\n");
         }
 
         Display ext = findExternalDisplay();
+
         if (ext == null) {
-            s.append("\nNo usable secondary display found.");
+            s.append(
+                    "\nNo usable secondary display found."
+            );
         } else {
-            s.append("\nUsing external display ID ").append(ext.getDisplayId()).append(".");
+            s.append(
+                    "\nExternal display ID: "
+            ).append(ext.getDisplayId());
+
+            s.append(
+                    "\nShell rotation: "
+            ).append(shellRotation).append("°");
         }
 
         displayInfo.setText(s.toString());
@@ -178,128 +268,349 @@ public class MainActivity extends Activity {
 
     private Display findExternalDisplay() {
         Display[] presentation =
-            displayManager.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
+                displayManager.getDisplays(
+                        DisplayManager.DISPLAY_CATEGORY_PRESENTATION
+                );
 
         for (Display d : presentation) {
-            if (d.getDisplayId() != Display.DEFAULT_DISPLAY && d.getState() != Display.STATE_OFF) {
+            if (
+                    d.getDisplayId()
+                            != Display.DEFAULT_DISPLAY
+                            &&
+                    d.getState()
+                            != Display.STATE_OFF
+            ) {
                 return d;
             }
         }
 
-        for (Display d : displayManager.getDisplays()) {
-            if (d.getDisplayId() != Display.DEFAULT_DISPLAY && d.getState() != Display.STATE_OFF) {
+        for (Display d :
+                displayManager.getDisplays()) {
+
+            if (
+                    d.getDisplayId()
+                            != Display.DEFAULT_DISPLAY
+                            &&
+                    d.getState()
+                            != Display.STATE_OFF
+            ) {
                 return d;
             }
         }
+
         return null;
     }
 
-    private void launchSelectedExternal() {
-        if (apps.isEmpty()) {
-            toast("No launcher apps found.");
-            return;
-        }
-
+    private void openExternalShell() {
         Display ext = findExternalDisplay();
+
         if (ext == null) {
-            toast("Connect the external screen first.");
+            toast(
+                    "Connect the external screen first."
+            );
             return;
         }
 
-        AppEntry entry = (AppEntry) appSpinner.getSelectedItem();
-        Intent launch = getPackageManager().getLaunchIntentForPackage(entry.packageName);
-        if (launch == null) {
-            toast("Couldn't get launch intent for " + entry.label);
-            return;
-        }
-
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        closeExternalShell();
 
         try {
-            ActivityOptions options = ActivityOptions.makeBasic();
-            options.setLaunchDisplayId(ext.getDisplayId());
-            startActivity(launch, options.toBundle());
-            toast("Launching " + entry.label + " on display " + ext.getDisplayId());
+            externalShell =
+                    new Presentation(this, ext);
+
+            Context pc =
+                    externalShell.getContext();
+
+            FrameLayout root =
+                    new FrameLayout(pc);
+
+            root.setBackgroundColor(
+                    Color.rgb(12, 12, 12)
+            );
+
+            ScrollView scroll =
+                    new ScrollView(pc);
+
+            LinearLayout panel =
+                    new LinearLayout(pc);
+
+            panel.setOrientation(
+                    LinearLayout.VERTICAL
+            );
+
+            panel.setPadding(
+                    dpFor(pc, 22),
+                    dpFor(pc, 22),
+                    dpFor(pc, 22),
+                    dpFor(pc, 22)
+            );
+
+            TextView title =
+                    new TextView(pc);
+
+            title.setText(
+                    "FOLD DISPLAY"
+            );
+
+            title.setTextSize(30);
+            title.setTextColor(Color.WHITE);
+            title.setGravity(Gravity.CENTER);
+
+            panel.addView(title);
+
+            TextView info =
+                    new TextView(pc);
+
+            info.setText(
+                    "External display " +
+                    ext.getDisplayId() +
+                    "\nRotation " +
+                    shellRotation +
+                    "°\n\nTap an app:"
+            );
+
+            info.setTextColor(
+                    Color.LTGRAY
+            );
+
+            info.setTextSize(16);
+            info.setGravity(Gravity.CENTER);
+
+            info.setPadding(
+                    0,
+                    dpFor(pc, 8),
+                    0,
+                    dpFor(pc, 15)
+            );
+
+            panel.addView(info);
+
+            for (AppEntry entry : apps) {
+                Button b =
+                        new Button(pc);
+
+                b.setText(entry.label);
+
+                b.setAllCaps(false);
+
+                b.setOnClickListener(
+                        v -> launchApp(entry)
+                );
+
+                panel.addView(b);
+            }
+
+            TextView footer =
+                    new TextView(pc);
+
+            footer.setText(
+                    "\nFrankenstein Fold v0.2\n" +
+                    "Touchscreen shell active"
+            );
+
+            footer.setTextColor(
+                    Color.GRAY
+            );
+
+            footer.setGravity(
+                    Gravity.CENTER
+            );
+
+            footer.setPadding(
+                    0,
+                    dpFor(pc, 20),
+                    0,
+                    dpFor(pc, 30)
+            );
+
+            panel.addView(footer);
+
+            scroll.addView(panel);
+
+            root.addView(
+                    scroll,
+                    new FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+            );
+
+            externalShell.setContentView(root);
+            externalShell.show();
+
+            applySoftwareRotation(
+                    scroll,
+                    shellRotation
+            );
+
+            toast(
+                    "Fold shell opened on display " +
+                    ext.getDisplayId()
+            );
+
+            refreshDisplays();
+
         } catch (Throwable t) {
-            toast("Android/Samsung blocked that launch: " + t.getClass().getSimpleName());
+            toast(
+                    "Fold shell failed: " +
+                    t.getClass().getSimpleName() +
+                    ": " +
+                    String.valueOf(t.getMessage())
+            );
         }
     }
 
-    private void launchTestExternal(int degrees) {
-        Display ext = findExternalDisplay();
-        if (ext == null) {
-            toast("Connect the external screen first.");
+    private void applySoftwareRotation(
+            View view,
+            int degrees
+    ) {
+        view.setRotation(
+                (float) degrees
+        );
+
+        if (
+                degrees == 90 ||
+                degrees == 270
+        ) {
+            view.post(() -> {
+                float w = view.getWidth();
+                float h = view.getHeight();
+
+                if (w <= 0 || h <= 0) return;
+
+                float scale =
+                        Math.min(
+                                h / w,
+                                w / h
+                        );
+
+                view.setScaleX(scale);
+                view.setScaleY(scale);
+            });
+        } else {
+            view.setScaleX(1f);
+            view.setScaleY(1f);
+        }
+    }
+
+    private void reopenShell() {
+        if (findExternalDisplay() == null) {
+            toast(
+                    "No external display."
+            );
             return;
         }
 
-        try {
-            final android.app.Presentation presentation =
-                    new android.app.Presentation(this, ext);
+        openExternalShell();
+    }
 
-            android.widget.FrameLayout root =
-                    new android.widget.FrameLayout(this);
-            root.setBackgroundColor(android.graphics.Color.BLACK);
-
-            android.widget.TextView text =
-                    new android.widget.TextView(this);
-            text.setText(
-                    "FOLD DISPLAY TEST\n\n" +
-                    "Display ID: " + ext.getDisplayId() + "\n" +
-                    "Software rotation: " + degrees + "°\n\n" +
-                    "TAP THIS SCREEN"
-            );
-            text.setTextColor(android.graphics.Color.WHITE);
-            text.setTextSize(28);
-            text.setGravity(android.view.Gravity.CENTER);
-
-            android.widget.FrameLayout.LayoutParams lp =
-                    new android.widget.FrameLayout.LayoutParams(
-                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                            android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-                    );
-
-            root.addView(text, lp);
-
-            text.setRotation((float) degrees);
-
-            if (degrees == 90 || degrees == 270) {
-                text.post(() -> {
-                    float sx = (float) text.getHeight() /
-                            Math.max(1, text.getWidth());
-                    float sy = (float) text.getWidth() /
-                            Math.max(1, text.getHeight());
-                    float scale = Math.min(sx, sy);
-
-                    text.setScaleX(scale);
-                    text.setScaleY(scale);
-                });
+    private void closeExternalShell() {
+        if (externalShell != null) {
+            try {
+                externalShell.dismiss();
+            } catch (Throwable ignored) {
             }
 
-            root.setOnClickListener(v -> {
-                text.setText(
-                        "TOUCH WORKS ✓\n\n" +
-                        "Display ID: " + ext.getDisplayId() + "\n" +
-                        "Rotation: " + degrees + "°"
+            externalShell = null;
+        }
+    }
+
+    private void launchApp(AppEntry entry) {
+        Intent launch =
+                getPackageManager()
+                        .getLaunchIntentForPackage(
+                                entry.packageName
+                        );
+
+        if (launch == null) {
+            toast(
+                    "Couldn't launch " +
+                    entry.label
+            );
+            return;
+        }
+
+        launch.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK
+        );
+
+        Display ext =
+                findExternalDisplay();
+
+        if (ext != null) {
+            try {
+                ActivityOptions options =
+                        ActivityOptions.makeBasic();
+
+                options.setLaunchDisplayId(
+                        ext.getDisplayId()
                 );
-            });
 
-            presentation.setContentView(root);
-            presentation.show();
+                startActivity(
+                        launch,
+                        options.toBundle()
+                );
 
-            toast("Presentation opened on display " + ext.getDisplayId());
+                toast(
+                        "Launching " +
+                        entry.label +
+                        " on external display"
+                );
+
+                return;
+
+            } catch (Throwable ignored) {
+            }
+        }
+
+        try {
+            startActivity(launch);
+
+            toast(
+                    "Samsung blocked external launch — opened " +
+                    entry.label +
+                    " on phone"
+            );
 
         } catch (Throwable t) {
-            toast("Presentation failed: " +
-                    t.getClass().getSimpleName() + ": " +
-                    String.valueOf(t.getMessage()));
+            toast(
+                    "Couldn't launch " +
+                    entry.label
+            );
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        closeExternalShell();
+        super.onDestroy();
     }
 
     private void toast(String text) {
-        Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+        Toast.makeText(
+                this,
+                text,
+                Toast.LENGTH_LONG
+        ).show();
     }
 
     private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
+        return Math.round(
+                value *
+                getResources()
+                        .getDisplayMetrics()
+                        .density
+        );
+    }
+
+    private int dpFor(
+            Context context,
+            int value
+    ) {
+        return Math.round(
+                value *
+                context.getResources()
+                        .getDisplayMetrics()
+                        .density
+        );
     }
 }
